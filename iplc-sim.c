@@ -1,233 +1,562 @@
----
-layout: default
-title: CSCI 2500 Group Project
-description: CSCI 2500 Group Project
-date: April 9, 2018
-header-includes:
-    - \usepackage{listings}
-    - \lstset{basicstyle=\ttfamily}
----
+/***********************************************************************/
+/***********************************************************************
+ Pipeline Cache Simulator
+ ***********************************************************************/
+/***********************************************************************/
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <math.h>
 
-# Instruction Pipeline and Cache (IPLC) Simulator
+#define MAX_CACHE_SIZE 10240
+#define CACHE_MISS_DELAY 10 // 10 cycle cache miss penalty
+#define MAX_STAGES 5
 
-## Due Date: Monday, April 30th, 2018
+// init the simulator
+void iplc_sim_init(int index, int blocksize, int assoc);
 
-## You are to implement this project in groups of seven. Each team should consist of three coders, three documenters, and a manager,
+// Cache simulator functions
+void iplc_sim_LRU_replace_on_miss(int index, int tag);
+void iplc_sim_LRU_update_on_hit(int index, int assoc);
+int iplc_sim_trap_address(unsigned int address);
 
-The maaager will assemble the presentation from data provided by the others and coordinate the project. 
+// Pipeline functions
+unsigned int iplc_sim_parse_reg(char *reg_str);
+void iplc_sim_parse_instruction(char *buffer);
+void iplc_sim_push_pipeline_stage();
+void iplc_sim_process_pipeline_rtype(char *instruction, int dest_reg,
+                                     int reg1, int reg2_or_constant);
+void iplc_sim_process_pipeline_lw(int dest_reg, int base_reg, unsigned int data_address);
+void iplc_sim_process_pipeline_sw(int src_reg, int base_reg, unsigned int data_address);
+void iplc_sim_process_pipeline_branch(int reg1, int reg2);
+void iplc_sim_process_pipeline_jump();
+void iplc_sim_process_pipeline_syscall();
+void iplc_sim_process_pipeline_nop();
 
-The three coders will each be responsible for one of the code sections. Pick the sections appropriately depending on your talents. The three documenters will each assist one of the coders.
+// Outout performance results
+void iplc_sim_finalize();
 
-If you cannot form a team of 7 then the manager will loose 10 points for each missing or additional member.
+typedef struct cache_line
+{
+    // Your data structures for implementing your cache should include:
+    // a valid bit
+    // a tag
+    // a method for handling varying levels of associativity
+    // a method for selecting which item in the cache is going to be replaced
+} cache_line_t;
 
-Except for the manager, you do not need to pick your roles until the end of the project. The manager must be picked by April 16. 
+cache_line_t *cache=NULL;
+int cache_index=0;
+int cache_blocksize=0;
+int cache_blockoffsetbits = 0;
+int cache_assoc=0;
+long cache_miss=0;
+long cache_access=0;
+long cache_hit=0;
 
-If your evaluation is at 90% or better then the manager will get a 10 point bonus. The "star" coder will also get a 10 point bonus. 
+char instruction[16];
+char reg1[16];
+char reg2[16];
+char offsetwithreg[16];
+unsigned int data_address=0;
+unsigned int instruction_address=0;
+unsigned int pipeline_cycles=0;   // how many cycles did you pipeline consume
+unsigned int instruction_count=0; // home many real instructions ran thru the pipeline
+unsigned int branch_predict_taken=0;
+unsigned int branch_count=0;
+unsigned int correct_branch_predictions=0;
+
+unsigned int debug=0;
+unsigned int dump_pipeline=1;
+
+enum instruction_type {NOP, RTYPE, LW, SW, BRANCH, JUMP, JAL, SYSCALL};
+
+typedef struct rtype
+{
+    char instruction[16];
+    int reg1;
+    int reg2_or_constant;
+    int dest_reg;
+    
+} rtype_t;
+
+typedef struct load_word
+{
+    unsigned int data_address;
+    int dest_reg;
+    int base_reg;
+    
+} lw_t;
+
+typedef struct store_word
+{
+    unsigned int data_address;
+    int src_reg;
+    int base_reg;
+} sw_t;
+
+typedef struct branch
+{
+    int reg1;
+    int reg2;
+    
+} branch_t;
 
 
-## Overview
-For this GROUP assignment you
-will be implementing and comparing various implementations of a
-combined instruction pipeline and cache (IPLC) simulator.  In
-particular, your group will be determining what design yields the best
-overall performance (i.e., fewest cycles).  For the pipeline/cache
-simulation portion, you will be given a template which you will need to
-extend including the following set of files:
+typedef struct jump
+{
+    char instruction[16];
+    
+} jump_t;
 
-\begin{itemize}
-\item {\bf instruction-trace.txt:} This is an instruction trace file. The
-format is described below.
-\item {\bf iplc-sim.c:} template for the simulator code.
-\item {\bf Makefile:} builds the iplc simulator.
-\item {\bf taken-2-2-2.out:} trace-file output for the case described below.
-Used to help you debug your implementation.
-\end{itemize}
+typedef struct pipeline
+{
+    enum instruction_type itype;
+    unsigned int instruction_address;
+    union
+    {
+        rtype_t   rtype;
+        lw_t      lw;
+        sw_t      sw;
+        branch_t  branch;
+        jump_t    jump;
+    }
+    stage;
+    
+} pipeline_t;
 
-## Instruction Trace Format
-Figure \ref{trace}, provides a example of the nearly 35,000 plus MIPS instruction
-trace. This trace is from a 2-D Matrix Swap and Multiply MIPS code.
+enum pipeline_stages {FETCH, DECODE, ALU, MEM, WRITEBACK};
 
-\begin{figure}[t!]
-\begin{verbatim}
-0x00400000  lw $4, 0($29): 7fffef48
-0x00400004  addiu $5, $29, 4
-0x00400008  addiu $6, $5, 4
-0x0040000c  sll $2, $4, 2
-0x00400010  addu $6, $6, $2
-0x00400014  jal 0x00400024
-0x00400024  addi $29, $29, -4
-0x00400028  sw $31, 0($29): 7fffef44
-0x0040002c  lui $4, 4097
-0x00400030  lui $1, 4097
-0x00400034  ori $5, $1, 200
-0x00400038  ori $6, $0, 5
-0x0040003c  jal 0x0040025c
-0x0040025c  ori $8, $0, 4
-0x00400260  add $9, $0, $0
-0x00400264  beq $9, $8, 180
-0x00400268  ori $10, $0, 2
-0x0040026c  beq $10, $8, 164
-0x00400270  add $11, $9, $9
-0x00400274  add $11, $11, $11
-0x00400278  add $11, $11, $11
-0x0040027c  add $11, $11, $11
-0x00400280  add $12, $10, $10
-0x00400284  add $12, $12, $12
-0x00400288  add $11, $11, $12
-0x0040028c  add $11, $11, $4
-0x00400290  lw $13, 0($11): 10010008
-\end{verbatim}
-\caption{Example instruction trace from the MIPS 2-D Matrix Swap and
-  Multiple Program. There are 34,753 instructions in this trace! }
-\label{trace}
-\end{figure}
+pipeline_t pipeline[MAX_STAGES];
 
-The format for each instruction is as follows. First, each instruction
-occupies a single line of text. The first field is the memory address at which
-the instruction is located. Next, follows the MIPS instruction mnemonic
-(e.g., `lw` for Load Word followed by the registers and or offset that
-might be used as part of the instruction. A colon (:) is used to denote the
-instruction has ended and the address that follows is the absolute memory DATA
-address that was read or written by that instruction if it accessed
-memory. Instructions that do not access memory will not have a colon nor
-DATA address following.
+/************************************************************************************************/
+/* Cache Functions ******************************************************************************/
+/************************************************************************************************/
+/*
+ * Correctly configure the cache.
+ */
+void iplc_sim_init(int index, int blocksize, int assoc)
+{
+    int i=0, j=0;
+    unsigned long cache_size = 0;
+    cache_index = index;
+    cache_blocksize = blocksize;
+    cache_assoc = assoc;
+    
+    
+    cache_blockoffsetbits =
+    (int) rint((log( (double) (blocksize * 4) )/ log(2)));
+    /* Note: rint function rounds the result up prior to casting */
+    
+    cache_size = assoc * ( 1 << index ) * ((32 * blocksize) + 33 - index - cache_blockoffsetbits);
+    
+    printf("Cache Configuration \n");
+    printf("   Index: %d bits or %d lines \n", cache_index, (1<<cache_index) );
+    printf("   BlockSize: %d \n", cache_blocksize );
+    printf("   Associativity: %d \n", cache_assoc );
+    printf("   BlockOffSetBits: %d \n", cache_blockoffsetbits );
+    printf("   CacheSize: %lu \n", cache_size );
+    
+    if (cache_size > MAX_CACHE_SIZE ) {
+        printf("Cache too big. Great than MAX SIZE of %d .... \n", MAX_CACHE_SIZE);
+        exit(-1);
+    }
+    
+    cache = (cache_line_t *) malloc((sizeof(cache_line_t) * 1<<index));
+    
+    // Dynamically create our cache based on the information the user entered
+    for (i = 0; i < (1<<index); i++) {
+    }
+    
+    // init the pipeline -- set all data to zero and instructions to NOP
+    for (i = 0; i < MAX_STAGES; i++) {
+        // itype is set to O which is NOP type instruction
+        bzero(&(pipeline[i]), sizeof(pipeline_t));
+    }
+}
 
-**NOTE: I have provided you with the code necessary to parse this instruction trace file.**
+/*
+ * iplc_sim_trap_address() determined this is not in our cache.  Put it there
+ * and make sure that is now our Most Recently Used (MRU) entry.
+ */
+void iplc_sim_LRU_replace_on_miss(int index, int tag)
+{
+    /* You must implement this function */
+}
 
-## Cache Details
+/*
+ * iplc_sim_trap_address() determined the entry is in our cache.  Update its
+ * information in the cache.
+ */
+void iplc_sim_LRU_update_on_hit(int index, int assoc_entry)
+{
+    /* You must implement this function */
+}
 
-Using this cache simulator and INSTRUCTION and DATA address trace (which the
-cache simulator skeleton code reads in for you), your overall goal is to find
-the optimal values for (1) block size, and (2) associativity such that the
-miss rate of the cache is minimal, yet the total size of the cache must
-**be less than 10240 bits**. Notice the total size of the cache is expressed in
-*bits* and not *bytes*!. Possible cache configurations are the following:
+/*
+ * Check if the address is in our cache.  Update our counter statistics 
+ * for cache_access, cache_hit, etc.  If our configuration supports
+ * associativity we may need to check through multiple entries for our
+ * desired index.  In that case we will also need to call the LRU functions.
+ */
+int iplc_sim_trap_address(unsigned int address)
+{
+    int i=0, index=0;
+    int tag=0;
+    int hit=0;
+    
+    // Call the appropriate function for a miss or hit
 
-\begin{itemize}
-\item {\bf Possible Block Sizes:}
-\begin{itemize}
-  \item 1 word (32 bits)
-  \item 2 words (64 bits)
-  \item 4 words (128 bits)
-\end{itemize}
+    /* expects you to return 1 for hit, 0 for miss */
+    return hit;
+}
 
-\item {\bf Levels of Associativity}
-\begin{itemize}
-\item direct mapped (1-way set associative)
-\item 2-way set associative
-\item 4-way set associative
-\end{itemize}
-\end{itemize}
+/*
+ * Just output our summary statistics.
+ */
+void iplc_sim_finalize()
+{
+    /* Finish processing all instructions in the Pipeline */
+    while (pipeline[FETCH].itype != NOP  ||
+           pipeline[DECODE].itype != NOP ||
+           pipeline[ALU].itype != NOP    ||
+           pipeline[MEM].itype != NOP    ||
+           pipeline[WRITEBACK].itype != NOP) {
+        iplc_sim_push_pipeline_stage();
+    }
+    
+    printf(" Cache Performance \n");
+    printf("\t Number of Cache Accesses is %ld \n", cache_access);
+    printf("\t Number of Cache Misses is %ld \n", cache_miss);
+    printf("\t Number of Cache Hits is %ld \n", cache_hit);
+    printf("\t Cache Miss Rate is %f \n\n", (double)cache_miss / (double)cache_access);
+    printf("Pipeline Performance \n");
+    printf("\t Total Cycles is %u \n", pipeline_cycles);
+    printf("\t Total Instructions is %u \n", instruction_count);
+    printf("\t Total Branch Instructions is %u \n", branch_count);
+    printf("\t Total Correct Branch Predictions is %u \n", correct_branch_predictions);
+    printf("\t CPI is %f \n\n", (double)pipeline_cycles / (double)instruction_count);
+}
 
-**Cache Size Function:** You can express the size of the cache in terms of 3 factors:
+/************************************************************************************************/
+/* Pipeline Functions ***************************************************************************/
+/************************************************************************************************/
 
-\begin{itemize}
-\item BlockSize
-\item Associativity
-\item IndexBits
-\end{itemize}
+/*
+ * Dump the current contents of our pipeline.
+ */
+void iplc_sim_dump_pipeline()
+{
+    int i;
+    
+    for (i = 0; i < MAX_STAGES; i++) {
+        switch(i) {
+            case FETCH:
+                printf("(cyc: %u) FETCH:\t %d: 0x%x \t", pipeline_cycles, pipeline[i].itype, pipeline[i].instruction_address);
+                break;
+            case DECODE:
+                printf("DECODE:\t %d: 0x%x \t", pipeline[i].itype, pipeline[i].instruction_address);
+                break;
+            case ALU:
+                printf("ALU:\t %d: 0x%x \t", pipeline[i].itype, pipeline[i].instruction_address);
+                break;
+            case MEM:
+                printf("MEM:\t %d: 0x%x \t", pipeline[i].itype, pipeline[i].instruction_address);
+                break;
+            case WRITEBACK:
+                printf("WB:\t %d: 0x%x \n", pipeline[i].itype, pipeline[i].instruction_address);
+                break;
+            default:
+                printf("DUMP: Bad stage!\n" );
+                exit(-1);
+        }
+    }
+}
 
-$CacheSize = Associativity * (2^{IndexBits} * (32 * BlockSize + 33 - IndexBits - BlockOffSetBits))$  
+/*
+ * Check if various stages of our pipeline require stalls, forwarding, etc.
+ * Then push the contents of our various pipeline stages through the pipeline.
+ */
+void iplc_sim_push_pipeline_stage()
+{
+    int i;
+    int data_hit=1;
+    
+    /* 1. Count WRITEBACK stage is "retired" -- This I'm giving you */
+    if (pipeline[WRITEBACK].instruction_address) {
+        instruction_count++;
+        if (debug)
+            printf("DEBUG: Retired Instruction at 0x%x, Type %d, at Time %u \n",
+                   pipeline[WRITEBACK].instruction_address, pipeline[WRITEBACK].itype, pipeline_cycles);
+    }
+    
+    /* 2. Check for BRANCH and correct/incorrect Branch Prediction */
+    if (pipeline[DECODE].itype == BRANCH) {
+        int branch_taken = 0;
+    }
+    
+    /* 3. Check for LW delays due to use in ALU stage and if data hit/miss
+     *    add delay cycles if needed.
+     */
+    if (pipeline[MEM].itype == LW) {
+        int inserted_nop = 0;
+    }
+    
+    /* 4. Check for SW mem acess and data miss .. add delay cycles if needed */
+    if (pipeline[MEM].itype == SW) {
+    }
+    
+    /* 5. Increment pipe_cycles 1 cycle for normal processing */
+    /* 6. push stages thru MEM->WB, ALU->MEM, DECODE->ALU, FETCH->ALU */
+    
+    // 7. This is a give'me -- Reset the FETCH stage to NOP via bezero */
+    bzero(&(pipeline[FETCH]), sizeof(pipeline_t));
+}
 
-where $BlockOffSetBits$ is the $Log_2$ of the BlockSize.
+/*
+ * This function is fully implemented.  You should use this as a reference
+ * for implementing the remaining instruction types.
+ */
+void iplc_sim_process_pipeline_rtype(char *instruction, int dest_reg, int reg1, int reg2_or_constant)
+{
+    /* This is an example of what you need to do for the rest */
+    iplc_sim_push_pipeline_stage();
+    
+    pipeline[FETCH].itype = RTYPE;
+    pipeline[FETCH].instruction_address = instruction_address;
+    
+    strcpy(pipeline[FETCH].stage.rtype.instruction, instruction);
+    pipeline[FETCH].stage.rtype.reg1 = reg1;
+    pipeline[FETCH].stage.rtype.reg2_or_constant = reg2_or_constant;
+    pipeline[FETCH].stage.rtype.dest_reg = dest_reg;
+}
 
-Using the above equation (which has been coded for you in the cache
-skeleton), you need to find the largest value for the index such that
-it results in a total cache size that is less than or equal to maximum
-cache size of 10,240 (10k) bits FOR EACH combination of blocks size
-and level of associativity. Thus, there will be 9 value combinations
-of index size, block size and level of associativity.  Your cache
-simulator should compute this.
+void iplc_sim_process_pipeline_lw(int dest_reg, int base_reg, unsigned int data_address)
+{
+    /* You must implement this function */
+}
 
-Use your software skills to build a "cache" data structure that is dynamic
-(i.e., use `malloc()`). Meaning, I do not want to see 9 hard coded cache data
-structures that correspond to the above 9 different configurations.
+void iplc_sim_process_pipeline_sw(int src_reg, int base_reg, unsigned int data_address)
+{
+    /* You must implement this function */
+}
 
-You are to assume that on reads and writes, the data is brought into the cache
--- i.e., to simplify things, you will have a ``write/miss'' in this cache.
+void iplc_sim_process_pipeline_branch(int reg1, int reg2)
+{
+    /* You must implement this function */
+}
 
-In order for you to check yourself, I have provided the pipeline trace and
-cache performance output for the 2 bits of cache index, 2 word block size,
-2-way set associative, branches taken case. Note, this case is not the largest
-cache size you could have had and is solely to help you debug.
+void iplc_sim_process_pipeline_jump(char *instruction)
+{
+    /* You must implement this function */
+}
 
-As you will see, for this very small cache (only 2480 bits) the cache
-miss rate is high (i.e., $>$ 16\%).  You are allowed to have a MAX
-cache size of 10240 bits. So, you need to determine the 9 possible
-configurations using the template such that each configuration is the
-maximum index (number of cache lines) for a given block size and level
-of associativity. Equally, if your cache simulator does not get this
-precise answer, then your cache simulator is incorrect and you will
-not get the performance in cycles correct.
+void iplc_sim_process_pipeline_syscall()
+{
+    /* You must implement this function */
+}
 
-\subsection{Pipeline Details}
+void iplc_sim_process_pipeline_nop()
+{
+    /* You must implement this function */
+}
 
-The pipeline is the standard 5-stage design consisting of FETCH, DECODE, ALU,
-MEM and WRITEBACK stages. The design features you are to consider are:
+/************************************************************************************************/
+/* parse Function *******************************************************************************/
+/************************************************************************************************/
 
-\begin{itemize}
-\item On a cache instruction MISS, the pipeline FETCH stage incurs a {\bf
-  stall penalty} of 10 clock cycles.
-\item On a data word MISS (LW/SW instruction) is also a 10 clock cycle {\bf
-  stall penalty} in the MEM stage for LW and WRITEBACK stage for SW.
-\item Determine which branch prediction method yields better performance, TAKEN or NOT-TAKEN? 
+/*
+ * Don't touch this function.  It is for parsing the instruction stream.
+ */
+unsigned int iplc_sim_parse_reg(char *reg_str)
+{
+    int i;
+    // turn comma into \n
+    if (reg_str[strlen(reg_str)-1] == ',')
+        reg_str[strlen(reg_str)-1] = '\n';
+    
+    if (reg_str[0] != '$')
+        return atoi(reg_str);
+    else {
+        // copy down over $ character than return atoi
+        for (i = 0; i < strlen(reg_str); i++)
+            reg_str[i] = reg_str[i+1];
+        
+        return atoi(reg_str);
+    }
+}
 
-\item Last, you are to ``forward'' registers across stages to avoid pipeline
-  stalls.
-\end{itemize}
+/*
+ * Don't touch this function.  It is for parsing the instruction stream.
+ */
+void iplc_sim_parse_instruction(char *buffer)
+{
+    int instruction_hit = 0;
+    int i=0, j=0;
+    int src_reg=0;
+    int src_reg2=0;
+    int dest_reg=0;
+    char str_src_reg[16];
+    char str_src_reg2[16];
+    char str_dest_reg[16];
+    char str_constant[16];
+    
+    if (sscanf(buffer, "%x %s", &instruction_address, instruction ) != 2) {
+        printf("Malformed instruction \n");
+        exit(-1);
+    }
+    
+    instruction_hit = iplc_sim_trap_address( instruction_address );
+    
+    // if a MISS, then push current instruction thru pipeline
+    if (!instruction_hit) {
+        // need to subtract 1, since the stage is pushed once more for actual instruction processing
+        // also need to allow for a branch miss prediction during the fetch cache miss time -- by
+        // counting cycles this allows for these cycles to overlap and not doubly count.
+        
+        printf("INST MISS:\t Address 0x%x \n", instruction_address);
+        
+        for (i = pipeline_cycles, j = pipeline_cycles; i < j + CACHE_MISS_DELAY - 1; i++)
+            iplc_sim_push_pipeline_stage();
+    }
+    else
+        printf("INST HIT:\t Address 0x%x \n", instruction_address);
+    
+    // Parse the Instruction
+    
+    if (strncmp( instruction, "add", 3 ) == 0 ||
+        strncmp( instruction, "sll", 3 ) == 0 ||
+        strncmp( instruction, "ori", 3 ) == 0) {
+        if (sscanf(buffer, "%x %s %s %s %s",
+                   &instruction_address,
+                   instruction,
+                   str_dest_reg,
+                   str_src_reg,
+                   str_src_reg2 ) != 5) {
+            printf("Malformed RTYPE instruction (%s) at address 0x%x \n",
+                   instruction, instruction_address);
+            exit(-1);
+        }
+        
+        dest_reg = iplc_sim_parse_reg(str_dest_reg);
+        src_reg = iplc_sim_parse_reg(str_src_reg);
+        src_reg2 = iplc_sim_parse_reg(str_src_reg2);
+        
+        iplc_sim_process_pipeline_rtype(instruction, dest_reg, src_reg, src_reg2);
+    }
+    
+    else if (strncmp( instruction, "lui", 3 ) == 0) {
+        if (sscanf(buffer, "%x %s %s %s",
+                   &instruction_address,
+                   instruction,
+                   str_dest_reg,
+                   str_constant ) != 4 ) {
+            printf("Malformed RTYPE instruction (%s) at address 0x%x \n",
+                   instruction, instruction_address );
+            exit(-1);
+        }
+        
+        dest_reg = iplc_sim_parse_reg(str_dest_reg);
+        src_reg = -1;
+        src_reg2 = -1;
+        iplc_sim_process_pipeline_rtype(instruction, dest_reg, src_reg, src_reg2);
+    }
+    
+    else if (strncmp( instruction, "lw", 2 ) == 0 ||
+             strncmp( instruction, "sw", 2 ) == 0  ) {
+        if ( sscanf( buffer, "%x %s %s %s %x",
+                    &instruction_address,
+                    instruction,
+                    reg1,
+                    offsetwithreg,
+                    &data_address ) != 5) {
+            printf("Bad instruction: %s at address %x \n", instruction, instruction_address);
+            exit(-1);
+        }
+        
+        if (strncmp(instruction, "lw", 2 ) == 0) {
+            
+            dest_reg = iplc_sim_parse_reg(reg1);
+            
+            // don't need to worry about base regs -- just insert -1 values
+            iplc_sim_process_pipeline_lw(dest_reg, -1, data_address);
+        }
+        if (strncmp( instruction, "sw", 2 ) == 0) {
+            src_reg = iplc_sim_parse_reg(reg1);
+            
+            // don't need to worry about base regs -- just insert -1 values
+            iplc_sim_process_pipeline_sw( src_reg, -1, data_address);
+        }
+    }
+    else if (strncmp( instruction, "beq", 3 ) == 0) {
+        // don't need to worry about getting regs -- just insert -1 values
+        iplc_sim_process_pipeline_branch(-1, -1);
+    }
+    else if (strncmp( instruction, "jal", 3 ) == 0 ||
+             strncmp( instruction, "jr", 2 ) == 0 ||
+             strncmp( instruction, "j", 1 ) == 0 ) {
+        iplc_sim_process_pipeline_jump( instruction );
+    }
+    else if (strncmp( instruction, "jal", 3 ) == 0 ||
+             strncmp( instruction, "jr", 2 ) == 0 ||
+             strncmp( instruction, "j", 1 ) == 0 ) {
+        /*
+         * Note: no need to worry about forwarding on the jump register
+         * we'll let that one go.
+         */
+        iplc_sim_process_pipeline_jump(instruction);
+    }
+    else if ( strncmp( instruction, "syscall", 7 ) == 0) {
+        iplc_sim_process_pipeline_syscall( );
+    }
+    else if ( strncmp( instruction, "nop", 3 ) == 0) {
+        iplc_sim_process_pipeline_nop( );
+    }
+    else {
+        printf("Do not know how to process instruction: %s at address %x \n",
+               instruction, instruction_address );
+        exit(-1);
+    }
+}
 
-Note, you will know if a branch is taken because you can see if the address
-for the next instruction is 4 bytes larger or not. That is, if $PC+4$ was not
-the next instruction, then you know the branch was taken. Thus, if your
-predictor guesses wrong, you just need to insert the NOP instruction into the
-pipeline but do not count that as a real instruction but count the cycles.
+/************************************************************************************************/
+/* MAIN Function ********************************************************************************/
+/************************************************************************************************/
 
-The forwarding logic can be found in the textbook.
-Note, however, your logic is much easier. You will know what instruction you
-are processing as opposed to particular control signal lines. For example, if
-either `Reg1` or `Reg2` being used in the DECODE stage are the
-`Dest_Reg` in the ALU, or MEM stages, you can FORWARD either `Reg1` or
-`Reg2` to avoid the stall. That is, when you detect this condition, you'll
-allow the pipeline to continue without stalling (e.g., adding delay cycles to
-overall cycle count). Also note that if a `Dest_Reg` in the WRITEBACK
-stage is used in the DECODE stage, then no forwarding is needed since the
-write occurs in the first half of the clock cycle and the read occurs in the
-last half of the clock cycle for that pipeline stage.
-
-The functions you will write for this functionality are detailed in comments
-provided in the template code `iplc-sim.c` which I will cover in class.
-
-## Performance Evaluation
-You will run your simulator 18 times -- 9 cache configurations plus branch
-predictor configured TAKEN and 9 cache configurations plus branch predictor
-configured NOT-TAKEN.
-
-**Show the summary output for all your runs and indicate which configuration performed best for this instruction trace file.**
-
-## Grading Criteria
-The following is how these projects will be graded.
-
-\begin{enumerate}
-\item The project is viewed as 3 major parts: Cache Simulator (15 points),
-  Pipeline Simulator (25 points), and Performance Evaluation (10 points).
-
-\item Write-up (detailed below) is worth 30 points.
-
-\item Presentation (detailed below) is worth 20 points.
-
-\item If you have a logic error with your cache or pipeline simulator, you
-  will only be deducted points from that part. So, suppose your cache
-  simulator does not work well at all, then you could obtain a score of 85
-  points if all other parts are done well.
-
-\item If your simulator seg faults or dumps core due to an error, the
-  most points you can obtain is 50. Having code written that does not work
-  correctly hurts you much more than having much less code that actually does
-  useful operations.
-\end{enumerate}
-
-## Report Write-up Instructions
-Provide a 3-page write-up. Each page shoud summarize one of the coding routines by summarizing the programming logic of the implementation.  The code must be commented and this will be a shared responsibility of the coder and documenter. The documentation is the responsibility of the documenter. Remember a picture is worth a thousand words. I will be reading at least 20 of these reports. 
-
-## Report Presentation Instructions
-Provide 3 slides that summarizes your project. Include a page describing the code, a page summarizing the results, and a page describing who did what.
+int main()
+{
+    char trace_file_name[1024];
+    FILE *trace_file = NULL;
+    char buffer[80];
+    int index = 10;
+    int blocksize = 1;
+    int assoc = 1;
+    
+    printf("Please enter the tracefile: ");
+    scanf("%s", trace_file_name);
+    
+    trace_file = fopen(trace_file_name, "r");
+    
+    if ( trace_file == NULL ) {
+        printf("fopen failed for %s file\n", trace_file_name);
+        exit(-1);
+    }
+    
+    printf("Enter Cache Size (index), Blocksize and Level of Assoc \n");
+    scanf( "%d %d %d", &index, &blocksize, &assoc );
+    
+    printf("Enter Branch Prediction: 0 (NOT taken), 1 (TAKEN): ");
+    scanf("%d", &branch_predict_taken );
+    
+    iplc_sim_init(index, blocksize, assoc);
+    
+    while (fgets(buffer, 80, trace_file) != NULL) {
+        iplc_sim_parse_instruction(buffer);
+        if (dump_pipeline)
+            iplc_sim_dump_pipeline();
+    }
+    
+    iplc_sim_finalize();
+    return 0;
+}
