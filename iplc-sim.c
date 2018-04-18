@@ -294,6 +294,18 @@ void iplc_sim_push_pipeline_stage()
     /* 2. Check for BRANCH and correct/incorrect Branch Prediction */
     if (pipeline[DECODE].itype == BRANCH) {
         int branch_taken = 0;
+        //My code
+        if(pipeline[FETCH].instruction_address != (pipeline[DECODE].instruction_address + 4)){
+            branch_taken += 1;
+            
+        }
+        if(branch_predict_taken == branch_taken){
+            //Insert NOP
+            correct_branch_predictions++;
+        } else {
+            pipeline_cycles ++;
+        }
+        branch_count++;
     }
     
     /* 3. Check for LW delays due to use in ALU stage and if data hit/miss
@@ -338,7 +350,16 @@ void iplc_sim_process_pipeline_rtype(char *instruction, int dest_reg, int reg1, 
 
 void iplc_sim_process_pipeline_lw(int dest_reg, int base_reg, unsigned int data_address)
 {
+<<<<<<< HEAD
    /* You must implement this function */
+=======
+    pipeline[FETCH].itype = LW;
+    pipeline[FETCH].instruction_address = instruction_address;
+
+    pipeline[FETCH].stage.lw.dest_reg = dest_reg;
+    pipeline[FETCH].stage.lw.base_reg = base_reg;
+    pipeline[FETCH].stage.lw.data_address = data_address;
+>>>>>>> 4913c6990b6b26b3292ba49e72dc3c26c3f28fc0
 }
 
 void iplc_sim_process_pipeline_sw(int src_reg, int base_reg, unsigned int data_address)
