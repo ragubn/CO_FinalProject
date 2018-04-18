@@ -294,6 +294,18 @@ void iplc_sim_push_pipeline_stage()
     /* 2. Check for BRANCH and correct/incorrect Branch Prediction */
     if (pipeline[DECODE].itype == BRANCH) {
         int branch_taken = 0;
+        //My code
+        if(pipeline[FETCH].instruction_address != (pipeline[DECODE].instruction_address + 4)){
+            branch_taken += 1;
+            
+        }
+        if(branch_predict_taken == branch_taken){
+            //Insert NOP
+            correct_branch_predictions++;
+        } else {
+            pipeline_cycles ++;
+        }
+        branch_count++;
     }
     
     /* 3. Check for LW delays due to use in ALU stage and if data hit/miss
@@ -301,15 +313,19 @@ void iplc_sim_push_pipeline_stage()
      */
     if (pipeline[MEM].itype == LW) {
         int inserted_nop = 0;
+
+        //TO DO
     }
     
     /* 4. Check for SW mem acess and data miss .. add delay cycles if needed */
     if (pipeline[MEM].itype == SW) {
+        //TO DO
     }
     
     /* 5. Increment pipe_cycles 1 cycle for normal processing */
+    //TO DO
     /* 6. push stages thru MEM->WB, ALU->MEM, DECODE->ALU, FETCH->ALU */
-    
+    //TO DO
     // 7. This is a give'me -- Reset the FETCH stage to NOP via bezero */
     bzero(&(pipeline[FETCH]), sizeof(pipeline_t));
 }
@@ -334,7 +350,12 @@ void iplc_sim_process_pipeline_rtype(char *instruction, int dest_reg, int reg1, 
 
 void iplc_sim_process_pipeline_lw(int dest_reg, int base_reg, unsigned int data_address)
 {
-    /* You must implement this function */
+    pipeline[FETCH].itype = LW;
+    pipeline[FETCH].instruction_address = instruction_address;
+
+    pipeline[FETCH].stage.lw.dest_reg = dest_reg;
+    pipeline[FETCH].stage.lw.base_reg = base_reg;
+    pipeline[FETCH].stage.lw.data_address = data_address;
 }
 
 void iplc_sim_process_pipeline_sw(int src_reg, int base_reg, unsigned int data_address)
