@@ -350,16 +350,12 @@ void iplc_sim_process_pipeline_rtype(char *instruction, int dest_reg, int reg1, 
 
 void iplc_sim_process_pipeline_lw(int dest_reg, int base_reg, unsigned int data_address)
 {
-<<<<<<< HEAD
-   /* You must implement this function */
-=======
     pipeline[FETCH].itype = LW;
     pipeline[FETCH].instruction_address = instruction_address;
 
     pipeline[FETCH].stage.lw.dest_reg = dest_reg;
     pipeline[FETCH].stage.lw.base_reg = base_reg;
     pipeline[FETCH].stage.lw.data_address = data_address;
->>>>>>> 4913c6990b6b26b3292ba49e72dc3c26c3f28fc0
 }
 
 void iplc_sim_process_pipeline_sw(int src_reg, int base_reg, unsigned int data_address)
