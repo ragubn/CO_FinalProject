@@ -301,15 +301,19 @@ void iplc_sim_push_pipeline_stage()
      */
     if (pipeline[MEM].itype == LW) {
         int inserted_nop = 0;
+
+        //TO DO
     }
     
     /* 4. Check for SW mem acess and data miss .. add delay cycles if needed */
     if (pipeline[MEM].itype == SW) {
+        //TO DO
     }
     
     /* 5. Increment pipe_cycles 1 cycle for normal processing */
+    //TO DO
     /* 6. push stages thru MEM->WB, ALU->MEM, DECODE->ALU, FETCH->ALU */
-    
+    //TO DO
     // 7. This is a give'me -- Reset the FETCH stage to NOP via bezero */
     bzero(&(pipeline[FETCH]), sizeof(pipeline_t));
 }
@@ -334,7 +338,7 @@ void iplc_sim_process_pipeline_rtype(char *instruction, int dest_reg, int reg1, 
 
 void iplc_sim_process_pipeline_lw(int dest_reg, int base_reg, unsigned int data_address)
 {
-    /* You must implement this function */
+   /* You must implement this function */
 }
 
 void iplc_sim_process_pipeline_sw(int src_reg, int base_reg, unsigned int data_address)
