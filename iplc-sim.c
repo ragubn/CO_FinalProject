@@ -44,6 +44,10 @@ typedef struct cache_line
     // a tag
     // a method for handling varying levels of associativity
     // a method for selecting which item in the cache is going to be replaced
+   int* valid;
+   int* tag;
+   long* LRU;//queue of items by age - [0] is LRU and [assoc - 1] is MRU
+
 } cache_line_t;
 
 cache_line_t *cache=NULL;
@@ -183,6 +187,26 @@ void iplc_sim_init(int index, int blocksize, int assoc)
 void iplc_sim_LRU_replace_on_miss(int index, int tag)
 {
     /* You must implement this function */
+   int i;
+    int min = 0;
+    int temp=0;
+
+    //I replace the first item of the queue with the item in the slot
+    min = cache[index].LRU[0];
+
+    //change all other items by moving them based on the spot that is being removed
+    for(i = 1; i < cache_assoc; i++){
+        cache[index].LRU[i - 1] = cache[index].LRU[i];
+        temp=i;
+    }
+    //Then I add the index that is to be replaced into the MRU spot
+    cache[index].LRU[cache_assoc - 1] = min;
+
+    //Update the tag and the valid bit
+    //Update so that if cache was not full during the miss
+    (cache[index].LRU)[temp] = cache_access;
+    (cache[index].tag)[temp] = tag;
+	(cache[index].valid)[temp] = 1;
 }
 
 /*
@@ -191,7 +215,25 @@ void iplc_sim_LRU_replace_on_miss(int index, int tag)
  */
 void iplc_sim_LRU_update_on_hit(int index, int assoc_entry)
 {
-    /* You must implement this function */
+    cache[index].LRU[assoc_entry] = cache_access;
+}
+/*
+ * Bit twiddling
+ * Pass in an integer.  Also pass in two numbers to construct
+ * the range of bits you are interested in viewing.
+ */
+int bit_twiddling(unsigned int val, int lsb, int msb)
+{
+	val >>= lsb;
+	int a = 1;
+	int counter;
+	for (counter = 0; counter < (msb - lsb + 1); counter++)
+	{
+		a <<=1;
+	}
+	a-=1;
+
+	return val & a;
 }
 
 /*
@@ -205,9 +247,33 @@ int iplc_sim_trap_address(unsigned int address)
     int i=0, index=0;
     int tag=0;
     int hit=0;
-    
-    // Call the appropriate function for a miss or hit
 
+    // Call the appropriate function for a miss or hit
+	cache_access++;
+	//finds the tag from address
+	tag = bit_twiddling(address, cache_index + cache_blockoffsetbits, 32);
+	//calling bit twiddling function to find index from address
+	index = bit_twiddling(address,cache_blockoffsetbits, cache_blockoffsetbits + cache_index - 1);
+	for (i=0;i < cache_assoc;i++) {
+        //if not valid
+		if (!cache[index].valid[i])
+			break;
+        //if entry is vald and the tags match, cache hits
+		if (cache[index].tag[i] == tag){
+			iplc_sim_LRU_update_on_hit(index,i);
+			hit = 1;
+			cache_hit++;
+			break;
+		}
+	}
+	//if not hit occurs
+	if (!hit){
+        //Update the assoc set with the new entry if > 1 associativity
+		cache_miss++;
+		iplc_sim_LRU_replace_on_miss(index,tag);
+	}
+
+	printf("Address %x: Tag= %x, Index= %d\n", address, tag, index);
     /* expects you to return 1 for hit, 0 for miss */
     return hit;
 }
