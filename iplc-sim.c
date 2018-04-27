@@ -294,6 +294,17 @@ void iplc_sim_push_pipeline_stage()
     /* 2. Check for BRANCH and correct/incorrect Branch Prediction */
     if (pipeline[DECODE].itype == BRANCH) {
         int branch_taken = 0;
+
+        if(pipeline[FETCH].instruction_address != (pipeline[DECODE].instruction_address + 4)){
+            branch_taken += 1;
+        }
+        if(branch_predict_taken == branch_taken){
+            //Insert NOP
+            correct_branch_predictions++;
+        } else {
+            pipeline_cycles ++;
+        }
+        branch_count++;
     }
     
     /* 3. Check for LW delays due to use in ALU stage and if data hit/miss
@@ -301,15 +312,48 @@ void iplc_sim_push_pipeline_stage()
      */
     if (pipeline[MEM].itype == LW) {
         int inserted_nop = 0;
+        if(pipeline[MEM].stage.lw.dest_reg == pipeline[ALU].instruction_address){
+            inserted_nop = 1;
+        }
+        
+        data_hit = iplc_sim_trap_address(pipeline[MEM].stage.lw.data_address);
+        if(data_hit){
+            printf("DATA HIT:\t Address 0x%x \n", pipeline[MEM].stage.lw.data_address);
+        }else{
+            printf("DATA MISS:\t Address 0x%x \n", pipeline[MEM].stage.lw.data_address);
+            if(inserted_nop){
+                inserted_nop = 2;   //make sure I don't count the NOP twice if it is also a data miss
+                pipeline_cycles += 9;
+            }else{
+                pipeline_cycles+=10;
+            }
+        }
+        if(inserted_nop == 1){      //if it is a 1 then no data miss so increment normally
+            pipeline_cycles += 10;
+        }
+        
+        iplc_sim_dump_pipeline();
     }
     
     /* 4. Check for SW mem acess and data miss .. add delay cycles if needed */
     if (pipeline[MEM].itype == SW) {
+        data_hit = iplc_sim_trap_address(pipeline[MEM].stage.sw.data_address);
+        if(data_hit){
+            printf("DATA HIT:\t Address 0x%x \n", pipeline[MEM].stage.sw.data_address);
+        }else{
+            printf("DATA MISS:\t Address 0x%x \n", pipeline[MEM].stage.sw.data_address);
+            pipeline_cycles += 10;
+        }
+        iplc_sim_dump_pipeline();
     }
     
     /* 5. Increment pipe_cycles 1 cycle for normal processing */
+     pipeline_cycles++;
+     
     /* 6. push stages thru MEM->WB, ALU->MEM, DECODE->ALU, FETCH->ALU */
-    
+    for(i = 0; i < MAX_STAGES-1; i++){
+        pipeline[i+1] = pipeline[i];
+    }
     // 7. This is a give'me -- Reset the FETCH stage to NOP via bezero */
     bzero(&(pipeline[FETCH]), sizeof(pipeline_t));
 }
