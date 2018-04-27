@@ -171,6 +171,15 @@ void iplc_sim_init(int index, int blocksize, int assoc)
     
     // Dynamically create our cache based on the information the user entered
     for (i = 0; i < (1<<index); i++) {
+    	cache[i].valid = (int*)malloc(sizeof(int)*assoc);
+	cache[i].LRU = (long*)malloc(sizeof(long)*assoc);
+	cache[i].tag = (int*)malloc(sizeof(int*)*assoc);
+
+	for (j=0; j<cache_assoc; j++) {
+		cache[i].tag[j] = 0;
+		cache[i].valid[j] = 0;
+		cache[i].LRU[j] = 0;
+	}
     }
     
     // init the pipeline -- set all data to zero and instructions to NOP
@@ -186,26 +195,23 @@ void iplc_sim_init(int index, int blocksize, int assoc)
  */
 void iplc_sim_LRU_replace_on_miss(int index, int tag)
 {
-    /* You must implement this function */
-   int i;
-    int min = 0;
-    int temp=0;
-
-    //I replace the first item of the queue with the item in the slot
-    min = cache[index].LRU[0];
-
-    //change all other items by moving them based on the spot that is being removed
-    for(i = 1; i < cache_assoc; i++){
-        cache[index].LRU[i - 1] = cache[index].LRU[i];
-        temp=i;
-    }
-    //Then I add the index that is to be replaced into the MRU spot
-    cache[index].LRU[cache_assoc - 1] = min;
-
-    //Update the tag and the valid bit
-    //Update so that if cache was not full during the miss
-    (cache[index].LRU)[temp] = cache_access;
-    (cache[index].tag)[temp] = tag;
+       
+	int i = 0;
+	//replace the first item in queue of items in slot
+	int min = (cache[index]).LRU[0];
+	int temp = 0; 
+	//change all the other items by moving them based on spot being removed
+	for (i = 0; i < cache_assoc; i++) 
+	{
+		if ( (cache[index].LRU)[i] < min)
+		{
+			temp = i;
+			min = (cache[index].LRU)[i];
+		}
+	}
+	// Update tag and valid bit along with the address
+	(cache[index].LRU)[temp] = cache_access;
+	(cache[index].tag)[temp] = tag; 
 	(cache[index].valid)[temp] = 1;
 }
 
